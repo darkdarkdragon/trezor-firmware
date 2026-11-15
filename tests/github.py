@@ -41,6 +41,9 @@ FIXTURES_TEMPLATE = "https://data.trezor.io/dev/firmware/ui_report/{run}/{job_in
 MODELS = [model.internal_name for model in models.ALL_MODELS]
 CORE_LANGUAGES = ["en", "cs", "de", "es", "fr", "id", "pt"]
 CORE_JOBS = ["core_device_test", "core_click_test", "core_persistence_test"]
+# Jobs of nightly workflows, with their languages. They keep their own fixtures file
+# (see TREZOR_UI_FIXTURES), so they are only fetched when named in `only_jobs`.
+NIGHTLY_CORE_JOBS = {"core_clear_signing_test": ["en"]}
 LEGACY_LANGUAGES = ["en"]
 LEGACY_JOBS = ["legacy_device_test"]
 
@@ -85,7 +88,9 @@ def get_branch_ui_fixtures_results(
                 languages = LEGACY_LANGUAGES
             else:
                 run_id = core_run_id
-                jobs = CORE_JOBS
+                jobs = CORE_JOBS + [
+                    job for job in NIGHTLY_CORE_JOBS if only_jobs and job in only_jobs
+                ]
                 languages = CORE_LANGUAGES
 
             if run_id is None:
@@ -95,6 +100,8 @@ def get_branch_ui_fixtures_results(
             with ThreadPoolExecutor(max_workers=8) as executor:
                 for lang in languages:
                     for job in jobs:
+                        if lang not in NIGHTLY_CORE_JOBS.get(job, languages):
+                            continue
                         job_instance = f"{model}-{lang}-{job}"
 
                         if only_jobs and all(

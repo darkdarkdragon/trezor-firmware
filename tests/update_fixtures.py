@@ -25,7 +25,7 @@ from collections.abc import Iterable
 import click
 
 from ui_tests import update_fixtures
-from ui_tests.common import FIXTURES_FILE, get_current_fixtures
+from ui_tests.common import FIXTURES_FILE, UI_TESTS_DIR, get_current_fixtures
 
 
 @click.group()
@@ -96,7 +96,22 @@ def ci(
     if exclude_jobs:
         print(f"Exclude jobs: {exclude_jobs}")
 
-    from github import get_branch_ui_fixtures_results
+    from github import NIGHTLY_CORE_JOBS, get_branch_ui_fixtures_results
+
+    requested_jobs = list(only_jobs or ())
+    nightly_jobs = [job for job in requested_jobs if job in NIGHTLY_CORE_JOBS]
+    if nightly_jobs:
+        # Nightly jobs run in their own workflow and keep their own fixtures file.
+        if len(nightly_jobs) != len(requested_jobs):
+            raise click.UsageError("Update nightly jobs separately from the others.")
+        if run_id is None:
+            raise click.UsageError(f"Pass the --run-id of the {nightly_jobs[0]} run.")
+        if FIXTURES_FILE.resolve() == (UI_TESTS_DIR / "fixtures.json").resolve():
+            raise click.UsageError(
+                "Set TREZOR_UI_FIXTURES to the fixtures file of the nightly job, "
+                "e.g. with `make -C core clear_signing_fixtures_update`."
+            )
+        print(f"Fixtures file: {FIXTURES_FILE}")
 
     ui_results = get_branch_ui_fixtures_results(branch, only_jobs, exclude_jobs, run_id)
     current_fixtures = get_current_fixtures()
