@@ -1,0 +1,1 @@
+Each model now reports its own FIDO2 AAGUID, so websites can show the device name for a security key.

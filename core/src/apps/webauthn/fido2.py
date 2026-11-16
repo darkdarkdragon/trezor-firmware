@@ -173,7 +173,27 @@ _BOGUS_APPID_FIREFOX = b"\0" * 32
 # SHA-256 of "make.me.blink", used by Firefox's authenticator-rs.
 _BOGUS_APPID_FIREFOX_BLINK = b"\xe8\x45\x41\xea\xf2\x07\xf7\xd7\x5a\xd0\x51\x43\x47\x70\xf6\xd1\xa9\xbf\x62\xf7\xea\x9b\xe5\x14\xfd\x4e\x0c\xa8\x27\x2b\x1d\xeb"
 _BOGUS_APPIDS = (_BOGUS_APPID_CHROME, _BOGUS_APPID_FIREFOX, _BOGUS_APPID_FIREFOX_BLINK)
-_AAGUID = b"\xd6\xd0\xbd\xc3b\xee\xc4\xdb\xde\x8dzenJD\x87"  # First 16 bytes of SHA-256("TREZOR 2")
+# Generic AAGUID d6d0bdc3-62ee-c4db-de8d-7a656e4a4487, first 16 bytes of
+# SHA-256("TREZOR 2"). Used by older firmware on all models. It is embedded in
+# _FIDO_ATT_CERT, so it is also the AAGUID reported with basic attestation.
+_AAGUID_GENERIC = b"\xd6\xd0\xbd\xc3\x62\xee\xc4\xdb\xde\x8d\x7a\x65\x6e\x4a\x44\x87"
+
+# Model-specific AAGUIDs, first 16 bytes of SHA-256(MODEL_FULL_NAME). Relying
+# parties map them to the device name via the FIDO Metadata Service.
+if utils.INTERNAL_MODEL == "T2T1":
+    # b636536b-defb-d95c-69a2-48478a92e88d, "Trezor Model T"
+    _AAGUID = b"\xb6\x36\x53\x6b\xde\xfb\xd9\x5c\x69\xa2\x48\x47\x8a\x92\xe8\x8d"
+elif utils.INTERNAL_MODEL in ("T2B1", "T3B1"):
+    # 01578cd4-b27a-7469-1a1a-d5e35eec187d, "Trezor Safe 3"
+    _AAGUID = b"\x01\x57\x8c\xd4\xb2\x7a\x74\x69\x1a\x1a\xd5\xe3\x5e\xec\x18\x7d"
+elif utils.INTERNAL_MODEL == "T3T1":
+    # fb77d275-0a74-98b7-1654-70eb9988df2c, "Trezor Safe 5"
+    _AAGUID = b"\xfb\x77\xd2\x75\x0a\x74\x98\xb7\x16\x54\x70\xeb\x99\x88\xdf\x2c"
+elif utils.INTERNAL_MODEL == "T3W1":
+    # c19f7712-b38c-e8ed-e564-616c31525699, "Trezor Safe 7"
+    _AAGUID = b"\xc1\x9f\x77\x12\xb3\x8c\xe8\xed\xe5\x64\x61\x6c\x31\x52\x56\x99"
+else:
+    _AAGUID = _AAGUID_GENERIC
 
 # authentication control byte
 _AUTH_ENFORCE = const(0x03)  # enforce user presence and sign
@@ -1644,9 +1664,21 @@ def _cbor_make_credential_sign(
     if user_verification:
         flags |= _AUTH_FLAG_UV
 
+    # use_self_attestation
+    app = knownapps.by_rp_id_hash(cred.rp_id_hash)
+    if app is not None and app.use_self_attestation is not None:
+        use_self_attestation = app.use_self_attestation
+    else:
+        use_self_attestation = _DEFAULT_USE_SELF_ATTESTATION
+
+    # The attestation certificate carries the generic AAGUID in its
+    # id-fido-gen-ce-aaguid extension and relying parties verify that it matches
+    # the AAGUID in the authenticator data.
+    aaguid = _AAGUID if use_self_attestation else _AAGUID_GENERIC
+
     # Encode the authenticator data (Credential ID, its public key and extensions).
     att_cred_data = (
-        _AAGUID + len(cred.id).to_bytes(2, "big") + cred.id + cred.public_key()
+        aaguid + len(cred.id).to_bytes(2, "big") + cred.id + cred.public_key()
     )
 
     extensions = b""
@@ -1663,13 +1695,6 @@ def _cbor_make_credential_sign(
         + att_cred_data
         + extensions
     )
-
-    # use_self_attestation
-    app = knownapps.by_rp_id_hash(cred.rp_id_hash)
-    if app is not None and app.use_self_attestation is not None:
-        use_self_attestation = app.use_self_attestation
-    else:
-        use_self_attestation = _DEFAULT_USE_SELF_ATTESTATION
 
     if use_self_attestation:
         sig = cred.sign((authenticator_data, client_data_hash))
