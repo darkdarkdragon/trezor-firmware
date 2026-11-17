@@ -33,7 +33,10 @@
 #define ROOT_PACKET_MAX_DRIFT (90 * 86400)  // 90 days
 
 static const mldsa44_public_key_t * const ROOT_PACKET_KEYS[] = {
-#if defined(BOOTLOADER_DEVEL) || defined(TREZOR_EMULATOR)
+// The development key is also trusted by a non-production build for the
+// production bootloader, the build a user can install on a standard device
+// after unlocking its bootloader. There are no production keys yet.
+#if defined(BOOTLOADER_DEVEL) || defined(TREZOR_EMULATOR) || !defined(PRODUCTION)
     (const mldsa44_public_key_t*)
     "\x9c\x2c\x88\x0b\xf1\xb7\x73\xc1\xfc\x7f\x68\xe8\x58\x89\x7e\x18"
     "\x47\xd6\xbe\x83\xf0\x7f\xfc\xfa\xa1\x0e\xe3\x5e\x5b\x44\xff\x58"
