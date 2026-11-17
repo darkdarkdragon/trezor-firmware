@@ -45,6 +45,21 @@ impl TargetArch {
     }
 }
 
+/// Whether `image` is a 64-bit little-endian Mach-O dynamic library for arm64,
+/// which is what an emulator build produces on Apple silicon.
+fn is_macos_arm64_dylib(image: &[u8]) -> bool {
+    const MH_MAGIC_64: u32 = 0xfeed_facf;
+    const CPU_TYPE_ARM64: u32 = 0x0100_000c;
+    const MH_DYLIB: u32 = 6;
+
+    let word = |offset: usize| {
+        image
+            .get(offset..offset + 4)
+            .map(|bytes| u32::from_le_bytes(bytes.try_into().unwrap()))
+    };
+    word(0) == Some(MH_MAGIC_64) && word(4) == Some(CPU_TYPE_ARM64) && word(12) == Some(MH_DYLIB)
+}
+
 /// Converts the ELF at `elf_path` into the app binary format Core loads:
 /// prepends a fixed-size `AppHeader` (built from `package`'s
 /// `[package.metadata.trezor]`, see [`crate::metadata`]) to the
@@ -62,28 +77,33 @@ pub fn convert_elf_to_bin(
     let raw_elf = fs::read(elf_path)
         .with_context(|| format!("Failed to read the elf file {:?}", elf_path))?;
 
-    let elf = object::File::parse(&*raw_elf)
-        .with_context(|| format!("Failed to parse the elf file {:?}", elf_path))?;
+    let (target_arch, code, data_size) = if is_macos_arm64_dylib(&raw_elf) {
+        // The macOS emulator dlopen()s the Mach-O dynamic library as it is.
+        (TargetArch::MacosAarch64, raw_elf, 0)
+    } else {
+        let elf = object::File::parse(&*raw_elf)
+            .with_context(|| format!("Failed to parse the elf file {:?}", elf_path))?;
 
-    ensure!(
-        elf.format() == object::BinaryFormat::Elf,
-        "Unsupported binary format: {:?}",
-        elf.format()
-    );
+        ensure!(
+            elf.format() == object::BinaryFormat::Elf,
+            "Unsupported binary format: {:?}",
+            elf.format()
+        );
 
-    let (target_arch, code, data_size) = match elf.architecture() {
-        object::Architecture::Arm => {
-            let arm_binary = armv8m::Armv8mBinary::from_object_file(&elf, package)?;
-            arm_binary.print_info();
-            (
-                TargetArch::Armv8m,
-                arm_binary.to_bytes()?,
-                arm_binary.ram_size(),
-            )
+        match elf.architecture() {
+            object::Architecture::Arm => {
+                let arm_binary = armv8m::Armv8mBinary::from_object_file(&elf, package)?;
+                arm_binary.print_info();
+                (
+                    TargetArch::Armv8m,
+                    arm_binary.to_bytes()?,
+                    arm_binary.ram_size(),
+                )
+            }
+            object::Architecture::X86_64 => (TargetArch::LinuxX86_64, raw_elf, 0),
+            object::Architecture::Aarch64 => (TargetArch::MacosAarch64, raw_elf, 0),
+            arch => anyhow::bail!("Unsupported architecture: {:?}", arch),
         }
-        object::Architecture::X86_64 => (TargetArch::LinuxX86_64, raw_elf, 0),
-        object::Architecture::Aarch64 => (TargetArch::MacosAarch64, raw_elf, 0),
-        arch => anyhow::bail!("Unsupported architecture: {:?}", arch),
     };
 
     // The inbox is allocated out of the app's own heap at launch, so a

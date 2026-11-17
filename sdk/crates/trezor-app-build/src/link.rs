@@ -7,6 +7,9 @@ pub fn link() -> Result<()> {
             // On macOS, link to System framework to get memcpy, memset, etc.
             println!("cargo:rustc-link-lib=System");
             println!("cargo:rustc-link-arg=-Wl,-export_dynamic");
+            // A `no_main` binary has no `_main`; Core's emulator dlopen()s the
+            // app, so link it as a dynamic library, like `-shared` on Linux.
+            println!("cargo:rustc-link-arg=-dynamiclib");
         } else if is_linux() {
             // On Linux, link to C library to get __libc_start_main, memcpy, etc.
             println!("cargo:rustc-link-lib=c");

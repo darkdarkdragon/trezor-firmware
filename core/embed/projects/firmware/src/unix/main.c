@@ -794,7 +794,9 @@ MP_NOINLINE int main_(int argc, char **argv) {
 }
 
 #if USE_IPC
-uint32_t ipc_buffer[IPC_COREAPP_BUFFER_SIZE / sizeof(uint32_t)];
+// `ipc_register()` needs the buffer aligned to `size_t`, which is stricter
+// than `uint32_t` on a 64-bit host.
+_Alignas(size_t) uint32_t ipc_buffer[IPC_COREAPP_BUFFER_SIZE / sizeof(uint32_t)];
 #endif
 
 int coreapp_emu(int argc, char **argv) {

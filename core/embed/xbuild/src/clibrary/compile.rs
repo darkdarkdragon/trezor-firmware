@@ -6,7 +6,7 @@ use color_eyre::eyre::WrapErr;
 use super::CLibrary;
 use crate::attrs::CompileAttrs;
 use crate::cargo_out;
-use crate::dep_tracking::{run_command, run_command_with_cc_dep};
+use crate::dep_tracking::{run_command, run_command_with_cc_dep, run_if_changed};
 use crate::helpers::{
     derive_output_path, diagnostics_color_flag, ensure_parent_directory, join_paths_lexically,
     links_name, measure_time, path_from_env,
@@ -300,11 +300,26 @@ fn make_static_library(objects: Vec<PathBuf>, lib_name: &str) -> Result<()> {
 
     let output = out_dir.join(format!("lib{}.a", lib_name));
 
-    let mut cmd = cc::Build::new().get_archiver();
-    cmd.arg("rcs").arg(&output).args(&objects);
-
-    run_command(&mut cmd, &objects, [&output])
+    if objects.is_empty() {
+        // BSD `ar` (macOS) refuses to create an archive without members, so
+        // write the empty archive directly. It is tracked like the archiver
+        // call below: the record of what made the archive changes with it, so
+        // a library whose sources come back is archived again.
+        run_if_changed(
+            std::iter::empty::<&Path>(),
+            [&output],
+            Some("empty-archive"),
+            None,
+            || Ok(std::fs::write(&output, b"!<arch>\n")?),
+        )
         .with_context(|| format!("Failed to create static library {}", output.display()))?;
+    } else {
+        let mut cmd = cc::Build::new().get_archiver();
+        cmd.arg("rcs").arg(&output).args(&objects);
+
+        run_command(&mut cmd, &objects, [&output])
+            .with_context(|| format!("Failed to create static library {}", output.display()))?;
+    }
 
     // Expose archive directory to the linker, both for rebuilt and cached archives
     cargo_out::rustc_link_search(format!("native={}", out_dir.display()));
