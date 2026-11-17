@@ -296,10 +296,21 @@ ts_t root_packet_verify(const void* data, size_t size,
     TSH_CHECK(key_idx < ARRAY_LENGTH(ROOT_PACKET_KEYS), TS_EBADMSG);
 
     secbool valid = secfalse;
+#if !defined(PRODUCTION) && !defined(BOOTLOADER_DEVEL) && \
+    !defined(TREZOR_EMULATOR)
+    // A non-production build for the production bootloader runs with the
+    // released secure monitor, which has no ML-DSA verification service:
+    // calling it stops the device with "Invalid smcall". Such a build trusts
+    // only the development keys, which are made from public seeds, so their
+    // signatures authenticate nothing. The signature is not verified here.
+    (void)status;
+    valid = sectrue;
+#else
     status =
         mldsa44_verify(&unauth->signature[sig_idx], &auth_hash,
                        sizeof(auth_hash), ROOT_PACKET_KEYS[key_idx], &valid);
     TSH_CHECK_OK(status);
+#endif
     TSH_CHECK(valid == sectrue, TS_EBADMSG);
 
     // Mark the key as used
